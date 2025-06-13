@@ -1,0 +1,91 @@
+name: Build LuCI App IPK
+
+on:
+  push:
+    branches:
+      - main # 或者你的开发分支
+  workflow_dispatch: # 允许手动触发
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    env:
+      # 根据你的目标设备调整 SDK URL 和架构信息
+      # 示例: OpenWrt 23.05.0 for ramips/mt7621
+      OPENWRT_SDK_URL: https://downloads.openwrt.org/releases/23.05.0/targets/ramips/mt7621/openwrt-sdk-23.05.0-ramips-mt7621_gcc-12.3.0_musl.Linux-x86_64.tar.xz
+      OPENWRT_SDK_DIR: openwrt-sdk # SDK 解压后的目录名可能包含版本号，这里假设我们重命名了
+      LUCI_APP_REPO: ${{ github.repository }} # 假设此 workflow 在你的 LuCI app fork 仓库中
+      LUCI_APP_NAME: luci-app-example # 你的 LuCI 包名 (通常是 Makefile 中定义的 PKG_NAME)
+      # LUCI_APP_BRANCH: main # 如果你的 app 在特定分支
+
+    steps:
+      - name: Checkout LuCI App source
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.LUCI_APP_REPO }}
+          # ref: ${{ env.LUCI_APP_BRANCH }} # 如果需要指定分支
+          path: source_luci_app # 将 LuCI App 源码检出到 'source_luci_app' 目录
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libncurses5-dev libncursesw5-dev \
+                               zlib1g-dev gawk git gettext libssl-dev xsltproc rsync wget \
+                               unzip python3 python3-distutils # 根据 OpenWrt 文档添加所需依赖
+
+      - name: Download and extract OpenWrt SDK
+        run: |
+          wget -O openwrt-sdk.tar.xz ${{ env.OPENWRT_SDK_URL }}
+          mkdir -p ${{ env.OPENWRT_SDK_DIR }}
+          tar -xJf openwrt-sdk.tar.xz -C ${{ env.OPENWRT_SDK_DIR }} --strip-components=1
+          cd ${{ env.OPENWRT_SDK_DIR }}
+          # ./scripts/feeds update -a  # 如果你的 LuCI App 依赖 OpenWrt feeds 中的包，取消注释
+          # ./scripts/feeds install -a # 同上
+
+      - name: Copy LuCI app to SDK package directory
+        run: |
+          # 假设你的 LuCI App 源码仓库根目录就是包的根目录 (包含 Makefile 等)
+          # 将其复制到 SDK 的 package 目录下，可以创建一个自定义子目录
+          mkdir -p ${{ env.OPENWRT_SDK_DIR }}/package/custom
+          cp -r ./source_luci_app ${{ env.OPENWRT_SDK_DIR }}/package/custom/${{ env.LUCI_APP_NAME }}
+
+      - name: Select LuCI app and build
+        working-directory: ./${{ env.OPENWRT_SDK_DIR }}
+        run: |
+          # 为 SDK 生成一个最小的 .config，或者你可以提供一个预设的 .config 文件
+          # 对于 SDK，通常不需要复杂的 .config，因为它已经针对特定目标了
+          # 但至少要让 make知道我们想编译这个包
+          echo "CONFIG_PACKAGE_${{ env.LUCI_APP_NAME }}=y" > .config
+          # 如果你的 LuCI App 有依赖，也需要在这里声明，例如：
+          # echo "CONFIG_PACKAGE_luci-base=y" >> .config # 大部分 LuCI App 都需要
+          # echo "CONFIG_PACKAGE_some-dependency=y" >> .config
+          make defconfig # 基于 .config 生成完整的配置
+
+          # 编译单个包
+          # 注意路径：package/custom/${{ env.LUCI_APP_NAME }}
+          make package/custom/${{ env.LUCI_APP_NAME }}/compile V=s IGNORE_ERRORS=m
+
+          # 如果编译失败，你可能需要更详细的错误输出 (V=sc)
+          # IGNORE_ERRORS=m 允许即使某些非关键包失败也继续，但对于单个包编译可能不需要
+
+      - name: Find and list IPK files
+        id: find_ipk
+        run: |
+          # IPK 文件通常在 bin/packages/<architecture>/base 或 /luci 或 /custom (取决于 Makefile)
+          # 架构名称可能比较复杂，例如 mips_24kc
+          find ./${{ env.OPENWRT_SDK_DIR }}/bin/packages/ -name "*.ipk" -print0 | xargs -0 -I {} echo "ipk_file={}" >> $GITHUB_OUTPUT
+          echo "Found IPKs:"
+          find ./${{ env.OPENWRT_SDK_DIR }}/bin/packages/ -name "*.ipk" -print
+
+      - name: Upload IPK artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: luci-app-${{ env.LUCI_APP_NAME }}-ipks
+          # path: ./${{ env.OPENWRT_SDK_DIR }}/bin/packages/**/*.ipk # 使用通配符
+          path: | # 更精确地指定路径，避免上传不必要的IPK
+            ./${{ env.OPENWRT_SDK_DIR }}/bin/packages/*/*/${{ env.LUCI_APP_NAME }}_*.ipk
+            ./${{ env.OPENWRT_SDK_DIR }}/bin/packages/*/*/*/${{ env.LUCI_APP_NAME }}_*.ipk
+            # 可能还有其他语言包，如 luci-i18n-example-zh-cn_*.ipk
+            ./${{ env.OPENWRT_SDK_DIR }}/bin/packages/*/*/luci-i18n-${{ env.LUCI_APP_NAME }}-*_*.ipk
+            ./${{ env.OPENWRT_SDK_DIR }}/bin/packages/*/*/*/luci-i18n-${{ env.LUCI_APP_NAME }}-*_*.ipk
