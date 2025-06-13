@@ -12,9 +12,8 @@ jobs:
 
     env:
       # 基于你的系统信息: OpenWrt R23.09.29 (AArch64 - Cortex-A53)
-      # Phicomm N1 (Amlogic S905D) 通常使用 armvirt/64 target
-      # 我们选择 OpenWrt 23.05.3 SDK for armvirt/64
-      OPENWRT_SDK_URL: https://downloads.openwrt.org/releases/23.05.3/targets/armvirt/64/openwrt-sdk-23.05.3-armvirt-64.Linux-x86_64.tar.xz # 修正: armvirt_64 -> armvirt-64
+      # 使用你找到的 armsr/armv8 SDK for OpenWrt 23.05.3
+      OPENWRT_SDK_URL: https://downloads.openwrt.org/releases/23.05.3/targets/armsr/armv8/openwrt-sdk-23.05.3-armsr-armv8_gcc-12.3.0_musl.Linux-x86_64.tar.xz
       OPENWRT_SDK_DIR: openwrt-sdk # SDK 解压后的目录名
       LUCI_APP_REPO: ${{ github.repository }} # 假设此 workflow 在你的 LuCI app fork 仓库中
       LUCI_APP_NAME: openlist-test # 你已设置为你的包名
@@ -31,18 +30,24 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          # 移除了 python3-distutils，因为它在较新的 Ubuntu 版本中不再需要或已合并
           sudo apt-get install -y build-essential ccache libncurses5-dev libncursesw5-dev \
                                zlib1g-dev gawk git gettext libssl-dev xsltproc rsync wget \
                                unzip python3 file
 
       - name: Download and extract OpenWrt SDK
         run: |
+          echo "Attempting to download SDK from: ${{ env.OPENWRT_SDK_URL }}"
           wget -O openwrt-sdk.tar.xz ${{ env.OPENWRT_SDK_URL }}
+          echo "SDK downloaded. Extracting..."
           # 提取并重命名，确保目录名是我们期望的 ${{ env.OPENWRT_SDK_DIR }}
-          TEMP_SDK_EXTRACT_DIR=$(tar -tf openwrt-sdk.tar.xz | head -1 | cut -f1 -d"/")
+          # SDK 文件名可能包含 gcc 版本等，解压后目录名也可能包含
+          ACTUAL_SDK_DIR_NAME_IN_TAR=$(tar -tf openwrt-sdk.tar.xz | head -1 | cut -f1 -d"/")
           tar -xJf openwrt-sdk.tar.xz
-          mv "${TEMP_SDK_EXTRACT_DIR}" "${{ env.OPENWRT_SDK_DIR }}"
+          # 确保将实际解压出的目录重命名为我们期望的 OPENWRT_SDK_DIR
+          if [ "${ACTUAL_SDK_DIR_NAME_IN_TAR}" != "${{ env.OPENWRT_SDK_DIR }}" ]; then
+            mv "${ACTUAL_SDK_DIR_NAME_IN_TAR}" "${{ env.OPENWRT_SDK_DIR }}"
+          fi
+          echo "SDK extracted to ${{ env.OPENWRT_SDK_DIR }}"
           cd ${{ env.OPENWRT_SDK_DIR }}
           # ./scripts/feeds update -a  # 如果你的 LuCI App 依赖 OpenWrt feeds 中的包，取消注释
           # ./scripts/feeds install -a # 同上
@@ -56,9 +61,10 @@ jobs:
         working-directory: ./${{ env.OPENWRT_SDK_DIR }}
         run: |
           # 为 SDK 生成一个最小的 .config，仅选择我们的包
-          echo "CONFIG_TARGET_armvirt=y" > .config # 确保目标平台被选中
-          echo "CONFIG_TARGET_armvirt_64=y" >> .config # 确保子目标被选中
-          echo "CONFIG_TARGET_armvirt_64_DEVICE_generic=y" >> .config # armvirt/64 SDK 通常需要指定一个设备
+          # 针对 armsr/armv8 target 进行配置
+          echo "CONFIG_TARGET_armsr=y" > .config
+          echo "CONFIG_TARGET_armsr_armv8=y" >> .config
+          echo "CONFIG_TARGET_armsr_armv8_DEVICE_generic=y" >> .config # armsr/armv8 SDK 通常需要指定一个设备
           echo "CONFIG_DEFAULT_TARGET_OPTIMIZATION=\"-Os -pipe -mcpu=cortex-a53\"" >> .config # 针对 Cortex-A53 优化
           echo "CONFIG_PACKAGE_luci-base=y" >> .config # 大部分LuCI App依赖这个
           # 你可能需要添加其他LuCI核心包，如luci-lib-jsonc, luci-lib-nixio等，根据你的app依赖
@@ -73,7 +79,7 @@ jobs:
           make defconfig # 基于 .config 生成完整的配置
 
           echo "Current .config relevant entries:"
-          grep -E "CONFIG_TARGET_armvirt|CONFIG_PACKAGE_luci|CONFIG_PACKAGE_${{ env.LUCI_APP_NAME }}|CONFIG_DEFAULT_TARGET_OPTIMIZATION" .config || true
+          grep -E "CONFIG_TARGET_armsr|CONFIG_PACKAGE_luci|CONFIG_PACKAGE_${{ env.LUCI_APP_NAME }}|CONFIG_DEFAULT_TARGET_OPTIMIZATION" .config || true
 
           # 编译单个包
           # 注意路径：package/custom/${{ env.LUCI_APP_NAME }}
