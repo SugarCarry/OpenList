@@ -14,11 +14,12 @@ jobs:
       # 基于你的系统信息: OpenWrt R23.09.29 (AArch64 - Cortex-A53)
       # Phicomm N1 (Amlogic S905D) 通常使用 armvirt/64 target
       # 我们选择 OpenWrt 23.05.3 SDK for armvirt/64
+      # 请再次确认这个 SDK URL 是你想要的最新且正确的版本
       OPENWRT_SDK_URL: https://downloads.openwrt.org/releases/23.05.3/targets/armvirt/64/openwrt-sdk-23.05.3-armvirt_64.Linux-x86_64.tar.xz
-      OPENWRT_SDK_DIR: openwrt-sdk # SDK 解压后的目录名，实际解压出来可能是 openwrt-sdk-23.05.3-armvirt_64.Linux-x86_64
+      OPENWRT_SDK_DIR: openwrt-sdk # SDK 解压后的目录名
       LUCI_APP_REPO: ${{ github.repository }} # 假设此 workflow 在你的 LuCI app fork 仓库中
       # !!! 重要: 请将下面的 LUCI_APP_NAME 修改为你的 LuCI 包的实际名称 (Makefile中的PKG_NAME) !!!
-      LUCI_APP_NAME: your-luci-app-name-here
+      LUCI_APP_NAME: openlist-test
       # LUCI_APP_BRANCH: main # 如果你的 app 在特定分支
 
     steps:
@@ -32,9 +33,10 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
+          # 移除了 python3-distutils，因为它在较新的 Ubuntu 版本中不再需要或已合并
           sudo apt-get install -y build-essential ccache libncurses5-dev libncursesw5-dev \
                                zlib1g-dev gawk git gettext libssl-dev xsltproc rsync wget \
-                               unzip python3 python3-distutils file
+                               unzip python3 file
 
       - name: Download and extract OpenWrt SDK
         run: |
@@ -76,10 +78,7 @@ jobs:
           # 编译单个包
           # 注意路径：package/custom/${{ env.LUCI_APP_NAME }}
           echo "Building package: ${{ env.LUCI_APP_NAME }}"
-          make package/custom/${{ env.LUCI_APP_NAME }}/compile V=s IGNORE_ERRORS=m # V=s for verbose, IGNORE_ERRORS for robustness if building multiple things
-
-          # 如果上面命令找不到包，尝试更通用的编译命令，它会自己找到包
-          # make package/${{ env.LUCI_APP_NAME }}/compile V=s
+          make package/custom/${{ env.LUCI_APP_NAME }}/compile V=s IGNORE_ERRORS=m # V=s for verbose
 
       - name: List IPK files for debugging
         run: |
@@ -94,10 +93,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: luci-app-${{ env.LUCI_APP_NAME }}-ipks-aarch64_cortex-a53
-          # SDK 会将 aarch64_cortex-a53 架构的包放在对应的目录下
-          # armvirt/64 SDK 编译出的包架构通常是 aarch64_generic 或者 aarch64_cortex-a53
-          # 具体架构名可以在编译日志或 bin/packages/ 目录下看到
-          # 使用更通用的路径匹配，以防架构名略有不同
           path: |
             ./${{ env.OPENWRT_SDK_DIR }}/bin/packages/*/*/${{ env.LUCI_APP_NAME }}_*.ipk
             ./${{ env.OPENWRT_SDK_DIR }}/bin/packages/*/*/*/${{ env.LUCI_APP_NAME }}_*.ipk
