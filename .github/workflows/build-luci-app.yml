@@ -14,12 +14,10 @@ jobs:
       # 基于你的系统信息: OpenWrt R23.09.29 (AArch64 - Cortex-A53)
       # Phicomm N1 (Amlogic S905D) 通常使用 armvirt/64 target
       # 我们选择 OpenWrt 23.05.3 SDK for armvirt/64
-      # 请再次确认这个 SDK URL 是你想要的最新且正确的版本
-      OPENWRT_SDK_URL: https://downloads.openwrt.org/releases/23.05.3/targets/armvirt/64/openwrt-sdk-23.05.3-armvirt_64.Linux-x86_64.tar.xz
+      OPENWRT_SDK_URL: https://downloads.openwrt.org/releases/23.05.3/targets/armvirt/64/openwrt-sdk-23.05.3-armvirt-64.Linux-x86_64.tar.xz # 修正: armvirt_64 -> armvirt-64
       OPENWRT_SDK_DIR: openwrt-sdk # SDK 解压后的目录名
       LUCI_APP_REPO: ${{ github.repository }} # 假设此 workflow 在你的 LuCI app fork 仓库中
-      # !!! 重要: 请将下面的 LUCI_APP_NAME 修改为你的 LuCI 包的实际名称 (Makefile中的PKG_NAME) !!!
-      LUCI_APP_NAME: openlist-test
+      LUCI_APP_NAME: openlist-test # 你已设置为你的包名
       # LUCI_APP_BRANCH: main # 如果你的 app 在特定分支
 
     steps:
@@ -60,6 +58,8 @@ jobs:
           # 为 SDK 生成一个最小的 .config，仅选择我们的包
           echo "CONFIG_TARGET_armvirt=y" > .config # 确保目标平台被选中
           echo "CONFIG_TARGET_armvirt_64=y" >> .config # 确保子目标被选中
+          echo "CONFIG_TARGET_armvirt_64_DEVICE_generic=y" >> .config # armvirt/64 SDK 通常需要指定一个设备
+          echo "CONFIG_DEFAULT_TARGET_OPTIMIZATION=\"-Os -pipe -mcpu=cortex-a53\"" >> .config # 针对 Cortex-A53 优化
           echo "CONFIG_PACKAGE_luci-base=y" >> .config # 大部分LuCI App依赖这个
           # 你可能需要添加其他LuCI核心包，如luci-lib-jsonc, luci-lib-nixio等，根据你的app依赖
           # echo "CONFIG_PACKAGE_luci-lib-jsonc=y" >> .config
@@ -73,7 +73,7 @@ jobs:
           make defconfig # 基于 .config 生成完整的配置
 
           echo "Current .config relevant entries:"
-          grep -E "CONFIG_TARGET_armvirt|CONFIG_PACKAGE_luci|CONFIG_PACKAGE_${{ env.LUCI_APP_NAME }}" .config || true
+          grep -E "CONFIG_TARGET_armvirt|CONFIG_PACKAGE_luci|CONFIG_PACKAGE_${{ env.LUCI_APP_NAME }}|CONFIG_DEFAULT_TARGET_OPTIMIZATION" .config || true
 
           # 编译单个包
           # 注意路径：package/custom/${{ env.LUCI_APP_NAME }}
